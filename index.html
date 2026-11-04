@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A Couch Divided</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@500;700;900&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="hud" class="hidden">
+      <div id="divider"></div>
+      <div id="topbar">
+        <div class="pct a" id="pct-a">0%</div>
+        <div id="timer">3:00</div>
+        <div class="pct b" id="pct-b">0%</div>
+      </div>
+      <canvas id="minimap" width="160" height="160"></canvas>
+    </div>
+    <div id="overlay"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
