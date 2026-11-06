@@ -3,7 +3,8 @@ import { TEAMS, HALF, ARENA_SIZE, OBSTACLES } from './config.js';
 export class Hud {
   constructor(root) {
     this.root = root;
-    this.panes = [0, 1].map((i) => this.buildPane(i));
+    this.panes = [0, 1, 2, 3].map((i) => this.buildPane(i));
+    this.humans = 2;
     this.timer = root.querySelector('#timer');
     this.pct = [root.querySelector('#pct-a'), root.querySelector('#pct-b')];
     this.mini = root.querySelector('#minimap');
@@ -11,12 +12,12 @@ export class Hud {
   }
 
   buildPane(i) {
-    const team = TEAMS[i];
+    const team = TEAMS[i % 2];
     const el = document.createElement('div');
     el.className = 'pane';
     el.dataset.p = i;
     el.style.setProperty('--team', team.css);
-    el.style.setProperty('--enemy', TEAMS[1 - i].css);
+    el.style.setProperty('--enemy', TEAMS[1 - (i % 2)].css);
     el.innerHTML = `
       <div class="vignette"></div>
       <div class="hitflash"></div>
@@ -29,7 +30,7 @@ export class Hud {
       </div>
       <div class="notice"></div>
       <div class="toast"></div>`;
-    this.root.insertBefore(el, this.root.firstChild);
+    this.root.insertBefore(el, this.root.querySelector('.divider'));
     const q = (s) => el.querySelector(s);
     return {
       el,
@@ -51,12 +52,23 @@ export class Hud {
     this.root.classList.toggle('hidden', !visible);
   }
 
-  setSolo(solo) {
-    this.root.classList.toggle('solo', solo);
+  // 1 human: full screen. 2: side by side. 3–4: quadrants (with 3, the empty bottom-right is an overview cam).
+  layout(humans) {
+    this.humans = humans;
+    this.root.classList.toggle('solo', humans === 1);
+    this.root.classList.toggle('quad', humans > 2);
+    this.panes.forEach((p, i) => {
+      const s = p.el.style;
+      p.el.hidden = i >= humans;
+      if (humans === 1) Object.assign(s, { left: '0', top: '0', width: '100%', height: '100%' });
+      else if (humans === 2) Object.assign(s, { left: `${i * 50}%`, top: '0', width: '50%', height: '100%' });
+      else Object.assign(s, { left: `${(i % 2) * 50}%`, top: `${Math.floor(i / 2) * 50}%`, width: '50%', height: '50%' });
+    });
   }
 
   toast(i, text, dur = 2) {
     const p = this.panes[i];
+    if (i >= this.humans) return;
     if (p.toast.textContent !== text) p.toast.textContent = text;
     p.toast.classList.add('show');
     p.toastT = dur;
@@ -64,6 +76,7 @@ export class Hud {
 
   notice(i, text) {
     const p = this.panes[i];
+    if (i >= this.humans) return;
     if (p.noticeText === text) return;
     p.noticeText = text;
     p.notice.textContent = text;
@@ -73,6 +86,7 @@ export class Hud {
   }
 
   hit(i) {
+    if (i >= this.humans) return;
     const f = this.panes[i].flash;
     f.classList.remove('on');
     void f.offsetWidth;
@@ -81,6 +95,7 @@ export class Hud {
 
   update(dt, players, timeLeft, coverage) {
     players.forEach((p, i) => {
+      if (i >= this.humans) return;
       const pane = this.panes[i];
       pane.fill.style.height = `${p.ink}%`;
       pane.tank.classList.toggle('low', p.ink < 15);
@@ -136,6 +151,12 @@ export class Hud {
       c.strokeStyle = '#fff';
       c.stroke();
       c.restore();
+      if (players.length > 2) {
+        c.font = 'bold 10px Rubik, sans-serif';
+        c.fillStyle = '#fff';
+        c.textAlign = 'center';
+        c.fillText(String(p.index + 1), toMap(p.pos.x), toMap(p.pos.z) - 10);
+      }
     }
   }
 }

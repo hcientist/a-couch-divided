@@ -80,8 +80,19 @@ export function obstacleAt(obstacles, x, z, y, pad = 0) {
   return null;
 }
 
-export function collideCircle(p, r, obstacles) {
+// Height of the highest block top under (x, z) that is at or below y, or 0 for the floor.
+export function groundHeight(obstacles, x, z, y, pad = 0) {
+  let h = 0;
   for (const o of obstacles) {
+    if (o.h > h && o.h <= y + 0.05 && x > o.minX - pad && x < o.maxX + pad && z > o.minZ - pad && z < o.maxZ + pad) h = o.h;
+  }
+  return h;
+}
+
+// Pushes a circle out of the blocks it overlaps. Blocks whose top is below y (the circle's feet) are skipped.
+export function collideCircle(p, r, obstacles, y = 0) {
+  for (const o of obstacles) {
+    if (o.h <= y + 0.02) continue;
     const cx = Math.min(Math.max(p.x, o.minX), o.maxX);
     const cz = Math.min(Math.max(p.z, o.minZ), o.maxZ);
     const dx = p.x - cx;

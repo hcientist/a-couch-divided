@@ -1,0 +1,7 @@
+services:
+  a-couch-divided:
+    build: .
+    image: a-couch-divided
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"

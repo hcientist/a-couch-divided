@@ -53,7 +53,7 @@ export class Effects {
     const s = Math.sin(p.yaw);
     const c = Math.cos(p.yaw);
     const a = p.yaw + (Math.random() - 0.5) * SHOT.spread * 2;
-    const pos = new THREE.Vector3(p.pos.x + s * 0.7 - c * 0.3, 1.05, p.pos.z + c * 0.7 + s * 0.3);
+    const pos = new THREE.Vector3(p.pos.x + s * 0.7 - c * 0.3, p.pos.y + 1.05, p.pos.z + c * 0.7 + s * 0.3);
     const vel = new THREE.Vector3(
       Math.sin(a) * SHOT.speed,
       SHOT.lift + p.pitch * 10 + (Math.random() - 0.5),
@@ -67,7 +67,7 @@ export class Effects {
   throwBomb(p) {
     const s = Math.sin(p.yaw);
     const c = Math.cos(p.yaw);
-    const pos = new THREE.Vector3(p.pos.x + s * 0.5, 1.4, p.pos.z + c * 0.5);
+    const pos = new THREE.Vector3(p.pos.x + s * 0.5, p.pos.y + 1.4, p.pos.z + c * 0.5);
     const vel = new THREE.Vector3(
       s * BOMB.speed + p.vel.x * 0.5,
       BOMB.lift + p.pitch * 8,
@@ -156,7 +156,7 @@ export class Effects {
       let dead = false;
       for (const p of players) {
         if (!p.alive || p.teamId === s.teamId) continue;
-        const cy = p.squid ? 0.3 : 0.9;
+        const cy = p.pos.y + (p.squid ? 0.3 : 0.9);
         const r = p.squid ? 0.6 : 0.75;
         const dx = s.pos.x - p.pos.x;
         const dy = s.pos.y - cy;

@@ -12,12 +12,11 @@ function clearLine(obstacles, a, b) {
   return true;
 }
 
-// A simple CPU opponent: paints unclaimed turf, fights when it can see you, swims to refill.
+// A simple CPU player: paints unclaimed turf, fights the nearest enemy it can see, swims to refill.
 // It produces the same input shape a human controller does.
 export class Bot {
-  constructor(me, foe) {
+  constructor(me) {
     this.me = me;
-    this.foe = foe;
     this.goal = null;
     this.retarget = 0;
     this.strafeDir = 1;
@@ -31,8 +30,8 @@ export class Bot {
   }
 
   think(dt, game) {
-    const out = { move: 0, strafe: 0, turn: 0, pitch: 0, fire: false, squid: false, bomb: false };
-    const { me, foe } = this;
+    const out = { move: 0, strafe: 0, turn: 0, pitch: 0, fire: false, squid: false, bomb: false, jump: false };
+    const { me } = this;
     if (!me.alive) {
       this.goal = null;
       return out;
@@ -40,15 +39,19 @@ export class Bot {
     if (me.ink < 10) this.refilling = true;
     else if (me.ink > 90) this.refilling = false;
 
-    const dx = foe.pos.x - me.pos.x;
-    const dz = foe.pos.z - me.pos.z;
-    const dist = Math.hypot(dx, dz);
-    const sees =
-      foe.alive &&
-      foe.invuln <= 0 &&
-      dist < 14 &&
-      (!foe.submerged || dist < 4) &&
-      clearLine(game.obstacles, me.pos, foe.pos);
+    let foe = null;
+    let dist = Infinity;
+    for (const p of game.players) {
+      if (p.teamId === me.teamId || !p.alive || p.invuln > 0) continue;
+      const d = Math.hypot(p.pos.x - me.pos.x, p.pos.z - me.pos.z);
+      if (d < 14 && (!p.submerged || d < 4) && d < dist && clearLine(game.obstacles, me.pos, p.pos)) {
+        foe = p;
+        dist = d;
+      }
+    }
+    const sees = !!foe;
+    const dx = foe ? foe.pos.x - me.pos.x : 0;
+    const dz = foe ? foe.pos.z - me.pos.z : 0;
 
     this.jitterT -= dt;
     if (this.jitterT <= 0) {
@@ -65,7 +68,7 @@ export class Bot {
       yaw = Math.atan2(lx, lz) + this.jitter;
       // Pick a pitch whose arc drops onto the target's torso.
       const t = Math.hypot(lx, lz) / SHOT.speed;
-      const vy = (0.5 * SHOT.gravity * t * t - 0.15) / Math.max(t, 0.05);
+      const vy = (0.5 * SHOT.gravity * t * t + (foe.pos.y - me.pos.y) - 0.15) / Math.max(t, 0.05);
       wantPitch = (vy - SHOT.lift) / 10;
       out.fire = Math.abs(wrap(yaw - me.yaw)) < 0.25;
       this.strafeT -= dt;
@@ -93,6 +96,7 @@ export class Bot {
       if (moved < 0.4 && (out.move || out.strafe)) {
         this.pickGoal(game, true);
         this.strafeDir *= -1;
+        out.jump = true;
       }
       this.stuckT = 0;
       this.lastX = me.pos.x;

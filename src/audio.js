@@ -1,8 +1,8 @@
-// Tiny synthesized sound effects. Each player's sounds are panned toward their half of the screen.
+// Tiny synthesized sound effects. Each player's sounds are panned toward their column of the split screen.
 export class Sfx {
   constructor() {
     this.ctx = null;
-    this.solo = false;
+    this.humans = 2;
     this.last = {};
   }
 
@@ -23,7 +23,8 @@ export class Sfx {
   }
 
   pan(i) {
-    return this.solo || i == null ? 0 : i === 0 ? -0.6 : 0.6;
+    if (this.humans <= 1 || i == null || i >= this.humans) return 0;
+    return i % 2 === 0 ? -0.6 : 0.6;
   }
 
   out(pan) {
@@ -89,6 +90,10 @@ export class Sfx {
 
   toss(i) {
     this.tone({ f: 300, f2: 700, dur: 0.15, type: 'triangle', vol: 0.1, pan: this.pan(i) });
+  }
+
+  jump(i) {
+    this.tone({ f: 240, f2: 520, dur: 0.1, type: 'triangle', vol: 0.07, pan: this.pan(i) });
   }
 
   boom(i) {

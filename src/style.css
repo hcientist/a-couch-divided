@@ -46,24 +46,14 @@ body {
   display: none;
 }
 
+/* Pane position/size is set inline by Hud.layout(). */
 .pane {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 50%;
   overflow: hidden;
 }
-.pane[data-p='0'] {
-  left: 0;
-}
-.pane[data-p='1'] {
-  right: 0;
-}
-#hud.solo .pane[data-p='0'] {
-  width: 100%;
-}
-#hud.solo .pane[data-p='1'],
-#hud.solo #divider {
+.pane[hidden],
+#hud.solo #divider,
+#hud:not(.quad) #divider-h {
   display: none;
 }
 
@@ -74,6 +64,16 @@ body {
   left: 50%;
   width: 6px;
   transform: translateX(-50%);
+  background: var(--night);
+  z-index: 2;
+}
+#divider-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
   background: var(--night);
   z-index: 2;
 }
@@ -150,12 +150,12 @@ body {
   font-size: 13px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
-.pane[data-p='1'] .tag {
+.pane:is([data-p='1'], [data-p='3']) .tag {
   left: auto;
   right: 18px;
   transform: rotate(3deg);
 }
-.pane[data-p='1'] .kd {
+.pane:is([data-p='1'], [data-p='3']) .kd {
   left: auto;
   right: 20px;
 }
@@ -168,7 +168,7 @@ body {
   align-items: flex-end;
   gap: 10px;
 }
-.pane[data-p='1'] .vitals {
+.pane:is([data-p='1'], [data-p='3']) .vitals {
   left: auto;
   right: 20px;
   flex-direction: row-reverse;
@@ -323,6 +323,20 @@ body {
   right: 16px;
   transform: none;
 }
+/* In 2x2 the minimap sits where the four views meet. */
+#hud.quad #minimap {
+  top: 50%;
+  bottom: auto;
+  width: 130px;
+  height: 130px;
+  transform: translate(-50%, -50%);
+}
+#hud.quad .tank {
+  height: 84px;
+}
+#hud.quad .notice {
+  font-size: clamp(22px, 3.5vw, 52px);
+}
 
 /* ---------- overlay screens ---------- */
 
@@ -394,10 +408,11 @@ h2 {
 }
 .modes button {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   gap: 4px;
-  min-width: 200px;
-  padding: 14px 22px;
+  min-width: 150px;
+  padding: 14px 16px;
   border: 3px solid #fff;
   border-radius: 16px;
   background: linear-gradient(135deg, var(--a), #ff4f8b);
@@ -407,7 +422,7 @@ h2 {
   box-shadow: 0 5px 0 rgba(0, 0, 0, 0.4);
   transition: transform 0.1s;
 }
-.modes button + button {
+.modes button:nth-child(even) {
   background: linear-gradient(135deg, var(--b), #19bfcc);
 }
 .modes button:hover {
@@ -497,4 +512,98 @@ h2 {
   grid-row: 3;
   font-family: var(--display);
   font-size: 22px;
+}
+
+/* ---------- controls screen ---------- */
+
+.link-btn,
+.key-actions button,
+.tabs button {
+  padding: 8px 16px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.link-btn:hover,
+.key-actions button:hover,
+.tabs button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.link-btn small,
+.key-actions small {
+  opacity: 0.7;
+}
+
+.keys-card {
+  max-height: 100%;
+  overflow-y: auto;
+}
+.tabs {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 18px 0 6px;
+}
+.tabs button {
+  min-width: 64px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 18px;
+  border-color: var(--c);
+  color: var(--c);
+}
+.tabs button.on {
+  background: var(--c);
+  color: #fff;
+}
+.prompt {
+  min-height: 3em;
+  margin: 10px auto 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.prompt small {
+  display: block;
+  opacity: 0.7;
+}
+.prompt.live b {
+  color: var(--c, #fff);
+}
+.controls.bind {
+  margin-top: 8px;
+}
+.controls.bind tbody tr {
+  cursor: pointer;
+}
+.controls.bind tbody tr:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.controls.bind tr.waiting {
+  background: var(--c);
+  animation: waiting 0.9s ease-in-out infinite alternate;
+}
+@keyframes waiting {
+  to {
+    background: transparent;
+  }
+}
+.controls.bind td {
+  min-width: 150px;
+}
+.note {
+  min-height: 1.4em;
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #ffd166;
+}
+.key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
 }

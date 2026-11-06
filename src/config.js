@@ -25,6 +25,14 @@ export const MOVE = {
   pitchPad: 1.6,
 };
 
+// Peak height = speed² / (2·gravity) ≈ 1.6, enough to hop onto the low blocks (1.2–1.5) but not the tall ones.
+export const JUMP = {
+  speed: 9.8,
+  gravity: 30,
+  coyote: 0.1, // seconds after walking off a ledge that a jump still counts
+  buffer: 0.12, // seconds a jump press is remembered before landing
+};
+
 export const SHOT = {
   cooldown: 0.09,
   inkCost: 1.1,

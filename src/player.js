@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { TEAMS, SPAWNS, MOVE, SHOT, BOMB, RESPAWN_SECONDS } from './config.js';
-import { collideCircle } from './arena.js';
+import { TEAMS, SPAWNS, MOVE, SHOT, BOMB, JUMP, RESPAWN_SECONDS } from './config.js';
+import { collideCircle, groundHeight } from './arena.js';
 
 export const RADIUS = 0.45;
 export const MAX_HP = 100;
@@ -9,9 +9,10 @@ export const MAX_INK = 100;
 export class Player {
   constructor(index, scene) {
     this.index = index;
-    this.team = TEAMS[index];
+    // Even slots are Tangerine, odd slots Cobalt: P1+P3 vs P2+P4.
+    this.team = TEAMS[index % 2];
     this.teamId = this.team.id;
-    this.spawn = SPAWNS[index];
+    this.spawn = { ...SPAWNS[index % 2] };
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.kid = buildKid(this.team);
@@ -24,6 +25,12 @@ export class Player {
     this.kills = 0;
     this.deaths = 0;
     this.reset();
+  }
+
+  // Spread teammates apart along the spawn edge so they don't spawn inside each other.
+  setSpawnOffset(dz) {
+    this.spawn = { ...SPAWNS[this.index % 2] };
+    this.spawn.z += dz;
   }
 
   reset() {
@@ -44,6 +51,11 @@ export class Player {
     this.invuln = 0;
     this.walkPhase = 0;
     this.splashT = 0;
+    this.grounded = true;
+    this.coyote = 0;
+    this.jumpBuf = 0;
+    this.airSpeed = MOVE.walk;
+    this.landT = 0;
     this.root.visible = true;
   }
 
@@ -69,15 +81,30 @@ export class Player {
 
     const firing = input.fire;
     this.squid = input.squid && !firing;
-    const under = paint.ownerAt(this.pos.x, this.pos.z);
+    // Ink only covers the floor: on a block top or in the air there's nothing to swim in or be slowed by.
+    const onFloor = this.grounded && this.pos.y < 0.01;
+    const under = onFloor ? paint.ownerAt(this.pos.x, this.pos.z) : 0;
     const onOwn = under === this.teamId;
     const onEnemy = under !== 0 && !onOwn;
     this.submerged = this.squid && onOwn;
 
     let speed;
-    if (this.squid) speed = this.submerged ? MOVE.swim : MOVE.squidDry;
+    if (!this.grounded) speed = this.airSpeed;
+    else if (this.squid) speed = this.submerged ? MOVE.swim : MOVE.squidDry;
     else if (onEnemy) speed = MOVE.enemyInk;
     else speed = firing ? MOVE.walkFiring : MOVE.walk;
+    if (this.grounded) this.airSpeed = Math.max(speed, MOVE.walkFiring);
+
+    this.jumpBuf = input.jump ? JUMP.buffer : this.jumpBuf - dt;
+    this.coyote = this.grounded ? JUMP.coyote : this.coyote - dt;
+    if (this.jumpBuf > 0 && this.coyote > 0) {
+      this.vel.y = JUMP.speed;
+      this.grounded = false;
+      this.coyote = 0;
+      this.jumpBuf = 0;
+      audio.jump(this.index);
+      if (this.submerged) fx.burst(new THREE.Vector3(this.pos.x, 0.2, this.pos.z), this.teamId, 10, 4);
+    }
 
     // forward = (sin yaw, cos yaw), right = (-cos yaw, sin yaw)
     const s = Math.sin(this.yaw);
@@ -89,12 +116,27 @@ export class Player {
       mx /= len;
       mz /= len;
     }
-    const k = Math.min(1, dt * (this.squid ? 8 : 12));
+    const k = Math.min(1, dt * (!this.grounded ? 4 : this.squid ? 8 : 12));
     this.vel.x += (mx * speed - this.vel.x) * k;
     this.vel.z += (mz * speed - this.vel.z) * k;
+    const prevY = this.pos.y;
+    if (!this.grounded) {
+      this.vel.y -= JUMP.gravity * dt;
+      this.pos.y += this.vel.y * dt;
+    }
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
-    collideCircle(this.pos, RADIUS, game.obstacles);
+    // Land on whatever top we were above last frame; walking off an edge starts a fall.
+    const ground = groundHeight(game.obstacles, this.pos.x, this.pos.z, prevY, RADIUS * 0.5);
+    if (this.pos.y <= ground) {
+      if (!this.grounded) this.land(ground, game);
+      this.pos.y = ground;
+      this.vel.y = 0;
+      this.grounded = true;
+    } else {
+      this.grounded = false;
+    }
+    collideCircle(this.pos, RADIUS, game.obstacles, this.pos.y);
 
     if (this.submerged) this.ink = Math.min(MAX_INK, this.ink + 42 * dt);
     else if (this.sinceFire > 0.6) this.ink = Math.min(MAX_INK, this.ink + (this.squid ? 10 : 5) * dt);
@@ -142,6 +184,14 @@ export class Player {
     this.animate(dt);
   }
 
+  land(height, game) {
+    const fall = -this.vel.y;
+    this.landT = Math.min(0.18, fall * 0.015);
+    if (height === 0 && game.paint.ownerAt(this.pos.x, this.pos.z) === this.teamId && fall > 4) {
+      game.fx.burst(new THREE.Vector3(this.pos.x, 0.1, this.pos.z), this.teamId, 6, 3);
+    }
+  }
+
   hurt(amount, attacker, game) {
     if (!this.alive || this.invuln > 0) return;
     this.hp -= amount;
@@ -170,10 +220,14 @@ export class Player {
     this.squidModel.visible = this.squid && !this.submerged && !blink;
     this.ripple.visible = this.submerged;
     this.inkFill.scale.y = Math.max(0.02, this.ink / MAX_INK);
-    const speed = Math.hypot(this.vel.x, this.vel.z);
+    const speed = this.grounded ? Math.hypot(this.vel.x, this.vel.z) : 0;
     this.walkPhase += speed * dt * 2.4;
     this.kid.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.07 * Math.min(1, speed / 4);
     this.squidModel.position.y = Math.abs(Math.sin(this.walkPhase * 1.3)) * 0.25 * Math.min(1, speed / 2);
+    // Squash on landing, stretch while rising.
+    this.landT = Math.max(0, this.landT - dt);
+    const squash = this.grounded ? this.landT * 1.6 : -Math.min(0.12, Math.max(0, this.vel.y) * 0.012);
+    for (const m of [this.kid, this.squidModel]) m.scale.set(1 + squash * 0.5, 1 - squash, 1 + squash * 0.5);
     this.ripple.scale.setScalar((1 + 0.15 * Math.sin(performance.now() / 120)) * (1 + speed / 14));
   }
 }

@@ -5,7 +5,7 @@ import { PaintSurface } from './paint.js';
 import { buildArena, obstacleAt } from './arena.js';
 import { Player } from './player.js';
 import { Effects } from './effects.js';
-import { Input, PAD } from './input.js';
+import { Input, PAD, ACTIONS, RESERVED_KEYS, keyName, padName } from './input.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { Bot } from './bot.js';
@@ -18,18 +18,21 @@ class CameraRig {
     this.look = new THREE.Vector3();
     this.tp = new THREE.Vector3();
     this.tl = new THREE.Vector3();
+    this.y = 0;
   }
 
   follow(p, dt, snap) {
     const s = Math.sin(p.yaw);
     const c = Math.cos(p.yaw);
+    // Ease vertical tracking so hops don't jerk the camera.
+    this.y = snap ? p.pos.y : this.y + (p.pos.y - this.y) * (1 - Math.exp(-dt * 6));
     if (p.alive) {
       const dist = p.squid ? 4.6 : 5.4;
-      const height = (p.squid ? 1.9 : 2.6) - p.pitch * 1.6;
+      const height = this.y + (p.squid ? 1.9 : 2.6) - p.pitch * 1.6;
       this.tp.set(p.pos.x - s * dist, height, p.pos.z - c * dist);
       const o = obstacleAt(OBSTACLES, this.tp.x, this.tp.z, this.tp.y + 0.3);
       if (o) this.tp.y = o.h + 0.6;
-      this.tl.set(p.pos.x + s * 8, 0.9 + p.pitch * 5, p.pos.z + c * 8);
+      this.tl.set(p.pos.x + s * 8, this.y + 0.9 + p.pitch * 5, p.pos.z + c * 8);
     } else {
       this.tp.set(p.pos.x - s * 5, 9, p.pos.z - c * 5);
       this.tl.set(p.pos.x, 0, p.pos.z);
@@ -61,19 +64,22 @@ resize();
 const scene = new THREE.Scene();
 const paint = new PaintSurface(OBSTACLES);
 buildArena(scene, paint);
-const players = [new Player(0, scene), new Player(1, scene)];
+// All four kids exist up front; each match activates the first 2 or 4 of them.
+const allPlayers = [0, 1, 2, 3].map((i) => new Player(i, scene));
+let players = allPlayers.slice(0, 2);
+allPlayers.slice(2).forEach((p) => (p.root.visible = false));
 const fx = new Effects(scene);
 const input = new Input();
 const audio = new Sfx();
 const hud = new Hud(document.getElementById('hud'));
-const rigs = [new CameraRig(0), new CameraRig(1)];
+const rigs = [0, 1, 2, 3].map((i) => new CameraRig(i));
 const overlay = document.getElementById('overlay');
 
 const game = { paint, obstacles: OBSTACLES, players, fx, audio, hud, onSplat };
 
 let state = 'title';
-let solo = false;
-let bot = null;
+let humans = 2; // people playing this match (1–4); CPUs fill the rest
+let bots = []; // bots[i] drives players[i] when it isn't a human
 let timeLeft = MATCH_SECONDS;
 let countdown = 0;
 let goT = 0;
@@ -89,20 +95,26 @@ function onSplat(victim, attacker) {
   hud.toast(victim.index, attacker ? `Splatted by ${attacker.team.name}` : 'Splatted!');
 }
 
-const CONTROLS = [
-  ['Move', 'W / S', 'I / K', 'Left stick'],
-  ['Turn', 'A / D', 'J / L', 'Right stick'],
-  ['Strafe', 'Q / E', 'U / O', 'Left stick'],
-  ['Aim up/down', '—', '—', 'Right stick'],
-  ['Shoot', 'F', 'H', 'RT'],
-  ['Squid (swim)', 'Shift or C', 'N or ;', 'LT / LB'],
-  ['Splat bomb', 'R', 'Y', 'RB'],
+// What the sticks do, shown next to each action's pad buttons (sticks can't be rebound).
+const STICK = { fwd: 'L-stick', back: 'L-stick', strafeL: 'L-stick', strafeR: 'L-stick', left: 'R-stick', right: 'R-stick', aimUp: 'R-stick', aimDown: 'R-stick' };
+const actionLabel = (id) => ACTIONS.find((a) => a.id === id).label;
+const keysText = (i, id) => input.bindings[i].keys[id].map(keyName).join(' / ') || '—';
+const padText = (i, id) => [...input.bindings[i].pad[id].map(padName), STICK[id]].filter(Boolean).join(' / ') || '—';
+const inputText = (inp) => (inp.kind === 'key' ? keyName(inp.code) : padName(inp.button));
+
+const MODES = [
+  { humans: 1, label: 'vs CPU', hint: '1v1 · press 1 · pad Ⓧ' },
+  { humans: 2, label: '2 Players', hint: '1v1 · press 2 · pad Ⓐ' },
+  { humans: 3, label: '3 Players', hint: '2v2 + CPU · press 3' },
+  { humans: 4, label: '4 Players', hint: '2v2 · press 4' },
 ];
+
+// Pad Ⓐ on the title starts a match for everyone who could be holding a controller.
+const padHumans = () => Math.min(4, Math.max(2, input.pads.length));
 
 function showTitle() {
   state = 'title';
-  solo = false;
-  bot = null;
+  bots = [];
   hud.show(false);
   fx.clear();
   paint.reset();
@@ -112,19 +124,137 @@ function showTitle() {
       <h1><span class="a">A Couch</span> <span class="b">Divided</span></h1>
       <p class="sub">a splitscreen ink turf war</p>
       <div class="modes">
-        <button data-mode="2p"><b>2 Players</b><small>press 1 · pad Ⓐ</small></button>
-        <button data-mode="cpu"><b>vs CPU</b><small>press 2 · pad Ⓧ</small></button>
+        ${MODES.map((m) => `<button data-humans="${m.humans}"><b>${m.label}</b><small>${m.hint}</small></button>`).join('')}
       </div>
       <table class="controls">
-        <thead><tr><th></th><th class="a">P1 (left)</th><th class="b">P2 (right)</th><th>Gamepad</th></tr></thead>
-        <tbody>${CONTROLS.map((r) => `<tr>${r.map((c, j) => (j ? `<td>${c}</td>` : `<th>${c}</th>`)).join('')}</tr>`).join('')}</tbody>
+        <thead><tr><th></th><th class="a">P1 keys</th><th class="b">P2 keys</th><th>P1 gamepad</th></tr></thead>
+        <tbody>${ACTIONS.map(
+          ({ id, label }) => `<tr><th>${label}</th><td>${keysText(0, id)}</td><td>${keysText(1, id)}</td><td>${padText(0, id)}</td></tr>`,
+        ).join('')}</tbody>
       </table>
+      <button class="link-btn" data-keys>Customize controls <small>(K)</small></button>
       <p class="tip">Cover the most floor in your color in ${MATCH_SECONDS / 60} minutes. Swim in your own ink to go fast and refill.
-      Enemy ink slows you down and hurts. Gamepads are assigned P1 then P2 in the order they connect. Esc pauses.</p>
+      Enemy ink slows you down and hurts. Jump onto the low blocks for a better angle.
+      Teams are P1 + P3 vs P2 + P4. P1 and P2 can use the keyboard; gamepads fill the remaining players first
+      (3 players + 1 pad → the pad is P3), then go to P1 and P2 in connection order. Esc pauses.</p>
     </div>`;
-  overlay.querySelectorAll('button[data-mode]').forEach((b) =>
-    b.addEventListener('click', () => startMatch(b.dataset.mode === 'cpu')),
+  overlay.querySelectorAll('button[data-humans]').forEach((b) =>
+    b.addEventListener('click', () => startMatch(Number(b.dataset.humans))),
   );
+  overlay.querySelector('[data-keys]').addEventListener('click', () => showKeys());
+}
+
+// ---------- controls screen: each player presses the input they want for each action ----------
+
+let keysPlayer = 0;
+let keysAction = null; // action currently waiting for an input
+let keysQueue = null; // remaining actions in a "set all" walkthrough
+let keysNote = '';
+
+function showKeys() {
+  state = 'keys';
+  keysAction = null;
+  keysQueue = null;
+  keysNote = '';
+  renderKeys();
+}
+
+function renderKeys() {
+  const i = keysPlayer;
+  const prompt = keysAction
+    ? `<b>P${i + 1}:</b> press a key or gamepad button for <b>${actionLabel(keysAction)}</b>
+       <small>Backspace keeps the current one${keysQueue ? ' and moves on' : ''} · Esc stops</small>`
+    : 'Click a control (or “Set all”), then press the key or gamepad button you want.';
+  overlay.className = '';
+  overlay.innerHTML = `
+    <div class="card keys-card ${i % 2 ? 'b' : 'a'}">
+      <h2>Controls</h2>
+      <div class="tabs">
+        ${[0, 1, 2, 3]
+          .map((p) => `<button data-player="${p}" class="${p % 2 ? 'b' : 'a'}${p === i ? ' on' : ''}">P${p + 1}</button>`)
+          .join('')}
+      </div>
+      <p class="prompt${keysAction ? ' live' : ''}">${prompt}</p>
+      <table class="controls bind">
+        <thead><tr><th></th><th>Keyboard</th><th>Gamepad</th></tr></thead>
+        <tbody>${ACTIONS.map(
+          ({ id, label }) => `
+          <tr data-action="${id}" class="${id === keysAction ? 'waiting' : ''}">
+            <th>${label}</th>
+            <td>${id === keysAction ? '…' : keysText(i, id)}</td>
+            <td>${id === keysAction ? '…' : padText(i, id)}</td>
+          </tr>`,
+        ).join('')}</tbody>
+      </table>
+      <p class="note">${keysNote}</p>
+      <div class="key-actions">
+        <button data-all>Set all for P${i + 1}</button>
+        <button data-reset>Reset P${i + 1} to defaults</button>
+        <button data-done>Done <small>(Esc)</small></button>
+      </div>
+      <p class="hint">Keyboard and gamepad are bound separately, so a player can use both. A key can only do one thing:
+      binding it here takes it off whatever had it. Sticks always move, turn and aim. Saved in this browser.</p>
+    </div>`;
+  const on = (sel, fn) =>
+    overlay.querySelectorAll(sel).forEach((el) =>
+      el.addEventListener('click', (e) => {
+        document.activeElement?.blur();
+        fn(e.currentTarget);
+      }),
+    );
+  on('[data-player]', (el) => {
+    keysPlayer = Number(el.dataset.player);
+    stopCapture('');
+  });
+  on('tr[data-action]', (el) => {
+    keysQueue = null;
+    keysNote = '';
+    capture(el.dataset.action);
+  });
+  on('[data-all]', () => {
+    keysNote = '';
+    keysQueue = ACTIONS.map((a) => a.id);
+    capture(keysQueue.shift());
+  });
+  on('[data-reset]', () => {
+    input.resetBindings(keysPlayer);
+    stopCapture(`P${keysPlayer + 1} reset to defaults.`);
+  });
+  on('[data-done]', () => {
+    input.capture = null;
+    showTitle();
+  });
+}
+
+function capture(action) {
+  keysAction = action;
+  input.capture = (inp) => onCaptured(action, inp);
+  renderKeys();
+}
+
+function stopCapture(note) {
+  input.capture = null;
+  keysAction = null;
+  keysQueue = null;
+  keysNote = note;
+  renderKeys();
+}
+
+function onCaptured(action, inp) {
+  input.capture = null;
+  if (inp.kind === 'key' && inp.code === 'Escape') return stopCapture('');
+  if (inp.kind === 'key' && RESERVED_KEYS.has(inp.code)) {
+    keysNote = '';
+  } else {
+    const moved = input.bind(keysPlayer, action, inp);
+    keysNote = moved.length
+      ? `${inputText(inp)} was taken off ${moved.map((m) => `P${m.player + 1} ${actionLabel(m.action)}`).join(', ')}.`
+      : '';
+  }
+  if (keysQueue && keysQueue.length) return capture(keysQueue.shift());
+  keysQueue = null;
+  keysAction = null;
+  renderKeys();
 }
 
 function showPause() {
@@ -145,17 +275,18 @@ function showResults() {
   overlay.innerHTML = `
     <div class="card end-card" style="--win:${winner < 0 ? '#fff' : TEAMS[winner].css}">
       <h2>${headline}</h2>
-      ${players
-        .map(
-          (p, i) => `
-        <div class="result ${i ? 'b' : 'a'}">
-          <div class="who">P${i + 1}${solo && i === 1 ? ' (CPU)' : ''} · ${p.team.name}</div>
-          <div class="bar"><div class="fill" data-w="${(cov[i] * 100).toFixed(1)}"></div></div>
-          <div class="num">${(cov[i] * 100).toFixed(1)}%</div>
-          <div class="stats">${p.kills} splats · ${p.deaths} splatted</div>
-        </div>`,
-        )
-        .join('')}
+      ${TEAMS.map((team, t) => {
+        const members = players.filter((p) => p.teamId === team.id);
+        const names = members.map((p) => `P${p.index + 1}${p.index >= humans ? ' (CPU)' : ''}`).join(' + ');
+        const stats = members.map((p) => `${members.length > 1 ? `P${p.index + 1}: ` : ''}${p.kills} splats · ${p.deaths} splatted`);
+        return `
+        <div class="result ${t ? 'b' : 'a'}">
+          <div class="who">${names} · ${team.name}</div>
+          <div class="bar"><div class="fill" data-w="${(cov[t] * 100).toFixed(1)}"></div></div>
+          <div class="num">${(cov[t] * 100).toFixed(1)}%</div>
+          <div class="stats">${stats.join('<br>')}</div>
+        </div>`;
+      }).join('')}
       <p class="hint">Enter / Ⓐ — rematch · Esc / Ⓑ — menu</p>
     </div>`;
   requestAnimationFrame(() =>
@@ -163,38 +294,56 @@ function showResults() {
   );
 }
 
-function startMatch(cpu) {
+function startMatch(n) {
   audio.unlock();
-  solo = cpu;
-  audio.solo = cpu;
-  hud.setSolo(cpu);
+  humans = n;
+  audio.humans = n;
+  hud.layout(n);
   hud.show(true);
   overlay.className = 'hidden';
   paint.reset();
   fx.clear();
+  const count = n > 2 ? 4 : 2;
+  players = allPlayers.slice(0, count);
+  game.players = players;
+  allPlayers.forEach((p, i) => (p.root.visible = i < count));
   for (const p of players) {
     p.kills = 0;
     p.deaths = 0;
+    p.setSpawnOffset(count > 2 ? (p.index < 2 ? -1.6 : 1.6) : 0);
     p.reset();
     paint.splat(p.spawn.x, p.spawn.z, 4.5, p.teamId, 0);
     p.animate(0);
   }
-  bot = cpu ? new Bot(players[1], players[0]) : null;
+  bots = players.map((p) => (p.index >= n ? new Bot(p) : null));
+  // Each view sees its own and its teammates' submerged ripples; the 3-player overview sees none.
+  rigs.forEach((r, i) => {
+    r.cam.layers.set(0);
+    if (i >= n) return;
+    players.forEach((p) => p.teamId === players[i].teamId && r.cam.layers.enable(1 + p.index));
+  });
   timeLeft = MATCH_SECONDS;
   countdown = COUNTDOWN_SECONDS;
   lastBeep = 0;
   goT = 0;
   warned = false;
   state = 'countdown';
-  rigs.forEach((r, i) => r.follow(players[i], 0, true));
+  players.forEach((p, i) => i < n && rigs[i].follow(p, 0, true));
 }
 
 function handleMeta() {
   if (state === 'title') {
-    if (input.key('Digit1') || input.key('Numpad1') || input.key('Enter') || input.padButton(PAD.A)) startMatch(false);
-    else if (input.key('Digit2') || input.key('Numpad2') || input.padButton(PAD.X)) startMatch(true);
+    const digit = [1, 2, 3, 4].find((d) => input.key(`Digit${d}`) || input.key(`Numpad${d}`));
+    if (digit) startMatch(digit);
+    else if (input.key('KeyK')) showKeys();
+    else if (input.key('Enter')) startMatch(2);
+    else if (input.padButton(PAD.A)) startMatch(padHumans());
+    else if (input.padButton(PAD.X)) startMatch(1);
+  } else if (state === 'keys') {
+    if (input.capture) return;
+    if (input.key('Escape') || input.padButton(PAD.B)) showTitle();
   } else if (state === 'end') {
-    if (input.key('Enter') || input.key('Space') || input.padButton(PAD.A)) startMatch(solo);
+    if (input.key('Enter') || input.key('Space') || input.padButton(PAD.A)) startMatch(humans);
     else if (input.key('Escape') || input.padButton(PAD.B)) showTitle();
   } else if (state === 'play' || state === 'countdown') {
     if (input.key('Escape') || input.padButton(PAD.START)) {
@@ -212,7 +361,7 @@ function handleMeta() {
 }
 
 function step(dt) {
-  if (state === 'title') {
+  if (state === 'title' || state === 'keys') {
     titleT += dt;
     attractT -= dt;
     if (attractT <= 0) {
@@ -244,7 +393,7 @@ function step(dt) {
 
   if (state === 'play') {
     goT -= dt;
-    players.forEach((p, i) => p.update(dt, bot && i === 1 ? bot.think(dt, game) : input.player(i), game));
+    players.forEach((p, i) => p.update(dt, bots[i] ? bots[i].think(dt, game) : input.player(i, humans), game));
     timeLeft -= dt;
     if (!warned && timeLeft <= 60) {
       warned = true;
@@ -273,9 +422,11 @@ function step(dt) {
   }
 
   fx.update(dt, game);
-  rigs.forEach((r, i) => r.follow(players[i], dt, false));
+  players.forEach((p, i) => i < humans && rigs[i].follow(p, dt, false));
+  if (humans === 3) rigs[3].orbit(performance.now() / 1000, 0);
 
   players.forEach((p, i) => {
+    if (i >= humans) return;
     let n = '';
     if (state === 'countdown') n = String(Math.ceil(countdown));
     else if (state === 'timeup') n = 'TIME!';
@@ -289,7 +440,11 @@ function step(dt) {
 function render() {
   const W = renderer.domElement.width / renderer.getPixelRatio();
   const H = renderer.domElement.height / renderer.getPixelRatio();
-  const views = solo && state !== 'title' ? [[0, 0, W, H]] : [[0, 0, W / 2, H], [W / 2, 0, W / 2, H]];
+  // Viewports are in GL coordinates (origin bottom-left), so the top row is y = H / 2.
+  let views;
+  if (state === 'title' || state === 'keys' || humans === 2) views = [[0, 0, W / 2, H], [W / 2, 0, W / 2, H]];
+  else if (humans === 1) views = [[0, 0, W, H]];
+  else views = [[0, H / 2, W / 2, H / 2], [W / 2, H / 2, W / 2, H / 2], [0, 0, W / 2, H / 2], [W / 2, 0, W / 2, H / 2]];
   renderer.shadowMap.needsUpdate = true;
   renderer.setScissorTest(true);
   views.forEach(([x, y, w, h], i) => {
@@ -312,7 +467,7 @@ function frame(now) {
   step(dt);
   paint.flush();
   render();
-  if (state !== 'title' && frameNo++ % 4 === 0) hud.drawMinimap(paint, players);
+  if (state !== 'title' && state !== 'keys' && frameNo++ % 4 === 0) hud.drawMinimap(paint, players);
   input.endFrame();
   requestAnimationFrame(frame);
 }
