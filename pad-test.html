@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gamepad Test</title>
+<style>
+  :root { --bg: #111; --fg: #eee; --dim: #777; --on: #4ade80; --bar: #60a5fa; --card: #1c1c1c; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, Menlo, monospace; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .pad { background: var(--card); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .meta { color: var(--dim); margin-bottom: 8px; word-break: break-all; }
+  .meta b { color: var(--fg); }
+  .axes, .buttons { display: grid; gap: 4px; }
+  .axes { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin-bottom: 12px; }
+  .axis { display: flex; align-items: center; gap: 8px; }
+  .track { position: relative; flex: 1; height: 14px; background: #2a2a2a; border-radius: 3px; }
+  .track::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #555; }
+  .fill { position: absolute; top: 0; bottom: 0; background: var(--bar); }
+  .axis.moved .fill { background: var(--on); }
+  .buttons { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+  .btn { padding: 4px 6px; border-radius: 4px; background: #2a2a2a; color: var(--dim); }
+  .btn.on { background: var(--on); color: #000; }
+  .btn.partial { background: #854d0e; color: var(--fg); }
+  .sticks { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+  .stick { width: 110px; height: 110px; border: 1px solid #444; border-radius: 50%; position: relative; }
+  .stick span { position: absolute; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: var(--on); }
+  .stick small { position: absolute; top: -18px; left: 0; color: var(--dim); }
+  #log { white-space: pre-wrap; color: var(--dim); max-height: 200px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>Gamepad test</h1>
+<p id="status">No gamepad yet. Press any button on the controller while this tab is focused.</p>
+<div id="pads"></div>
+<h1>Events</h1>
+<div id="log"></div>
+<script>
+const padsEl = document.getElementById('pads');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const log = (msg) => { logEl.textContent = `${new Date().toLocaleTimeString()}  ${msg}\n` + logEl.textContent; };
+
+addEventListener('gamepadconnected', (e) => log(`connected #${e.gamepad.index}: ${e.gamepad.id} (mapping "${e.gamepad.mapping}", ${e.gamepad.axes.length} axes, ${e.gamepad.buttons.length} buttons)`));
+addEventListener('gamepaddisconnected', (e) => log(`disconnected #${e.gamepad.index}: ${e.gamepad.id}`));
+
+const prev = new Map(); // index -> {axes, buttons} for change logging
+
+function frame() {
+  const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+  statusEl.textContent = pads.length
+    ? `${pads.length} gamepad(s). Values update live; changes are logged below.`
+    : 'No gamepad yet. Press any button on the controller while this tab is focused.';
+
+  padsEl.innerHTML = pads.map((p) => {
+    const before = prev.get(p.index);
+    p.axes.forEach((v, i) => {
+      if (before && Math.abs(v - before.axes[i]) > 0.25) log(`#${p.index} axis ${i}: ${before.axes[i].toFixed(2)} → ${v.toFixed(2)}`);
+    });
+    p.buttons.forEach((b, i) => {
+      const was = before?.buttons[i];
+      if (before && b.pressed !== was) log(`#${p.index} button ${i} ${b.pressed ? 'down' : 'up'} (value ${b.value.toFixed(2)})`);
+    });
+    prev.set(p.index, { axes: [...p.axes], buttons: p.buttons.map((b) => b.pressed) });
+
+    const sticks = [];
+    for (let i = 0; i + 1 < p.axes.length; i += 2) {
+      const x = (p.axes[i] + 1) * 50, y = (p.axes[i + 1] + 1) * 50;
+      sticks.push(`<div class="stick"><small>axes ${i}/${i + 1}</small><span style="left:${x}%;top:${y}%"></span></div>`);
+    }
+    const axes = p.axes.map((v, i) => {
+      const left = v < 0 ? 50 + v * 50 : 50, width = Math.abs(v) * 50;
+      return `<div class="axis${Math.abs(v) > 0.2 ? ' moved' : ''}"><span>axis ${i}</span>
+        <div class="track"><div class="fill" style="left:${left}%;width:${width}%"></div></div>
+        <span>${v >= 0 ? ' ' : ''}${v.toFixed(2)}</span></div>`;
+    }).join('');
+    const buttons = p.buttons.map((b, i) =>
+      `<div class="btn ${b.pressed ? 'on' : b.value > 0.05 ? 'partial' : ''}">b${i} ${b.value.toFixed(2)}</div>`).join('');
+
+    return `<div class="pad">
+      <div class="meta">#${p.index} <b>${p.id}</b><br>mapping: <b>"${p.mapping || '(none — non-standard)'}"</b> ·
+        connected: ${p.connected} · ${p.axes.length} axes · ${p.buttons.length} buttons · timestamp ${p.timestamp.toFixed(0)}</div>
+      <div class="sticks">${sticks.join('')}</div>
+      <div class="axes">${axes}</div>
+      <div class="buttons">${buttons}</div>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

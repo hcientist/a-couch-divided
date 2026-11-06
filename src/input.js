@@ -217,6 +217,14 @@ export class Input {
       this.prevButtons.set(pad.index, now);
       return now.map((v, i) => v && !prev[i]);
     });
+    // Stick deflection, so capture can notice a stick push. It must return to center before it
+    // counts again, so holding a stick doesn't race through a "set all" walkthrough.
+    const stick = Math.max(0, ...this.pads.flatMap((p) => p.axes.slice(0, 4).map(Math.abs)));
+    if (stick < 0.3) this.stickArmed = true;
+    if (this.capture && this.stickArmed && stick > 0.6) {
+      this.stickArmed = false;
+      this.capture({ kind: 'stick' });
+    }
     if (this.capture) {
       for (const buttons of this.padPressed) {
         const button = buttons.indexOf(true);
@@ -242,10 +250,11 @@ export class Input {
   }
 
   // Which gamepad (index into this.pads) drives player i when `humans` people are playing.
-  // P1/P2 can use the keyboard, so pads fill the remaining players first: with 3 humans and
-  // 1 pad the pad is P3; with 4 humans and 2 pads they're P3 and P4; with 4 pads, P1–P4.
+  // With 1–2 humans, pads go to P1 then P2 (keyboard still works for both). With 3–4 humans,
+  // P3/P4 have no keyboard, so pads fill them first: 3 humans + 1 pad → the pad is P3;
+  // 4 humans + 2 pads → P3 and P4; 4 pads → P1–P4.
   padFor(i, humans) {
-    const offset = Math.min(2, Math.max(0, humans - this.pads.length));
+    const offset = humans <= 2 ? 0 : Math.min(2, Math.max(0, humans - this.pads.length));
     const slot = i - offset;
     return slot >= 0 && slot < this.pads.length ? slot : -1;
   }

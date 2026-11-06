@@ -135,8 +135,8 @@ function showTitle() {
       <button class="link-btn" data-keys>Customize controls <small>(K)</small></button>
       <p class="tip">Cover the most floor in your color in ${MATCH_SECONDS / 60} minutes. Swim in your own ink to go fast and refill.
       Enemy ink slows you down and hurts. Jump onto the low blocks for a better angle.
-      Teams are P1 + P3 vs P2 + P4. P1 and P2 can use the keyboard; gamepads fill the remaining players first
-      (3 players + 1 pad → the pad is P3), then go to P1 and P2 in connection order. Esc pauses.</p>
+      Teams are P1 + P3 vs P2 + P4. P1 and P2 can use the keyboard. With 1–2 players, gamepads go to P1 then P2;
+      with 3–4, they fill the players without a keyboard first (3 players + 1 pad → the pad is P3). Esc pauses.</p>
     </div>`;
   overlay.querySelectorAll('button[data-humans]').forEach((b) =>
     b.addEventListener('click', () => startMatch(Number(b.dataset.humans))),
@@ -243,7 +243,15 @@ function stopCapture(note) {
 function onCaptured(action, inp) {
   input.capture = null;
   if (inp.kind === 'key' && inp.code === 'Escape') return stopCapture('');
-  if (inp.kind === 'key' && RESERVED_KEYS.has(inp.code)) {
+  if (inp.kind === 'stick') {
+    // Sticks can't be rebound. On a stick-driven action, a stick push means "keep it" and moves on;
+    // otherwise keep waiting for a real button.
+    if (!STICK[action]) {
+      keysNote = 'Sticks can’t be bound — press a key or gamepad button.';
+      return capture(action);
+    }
+    keysNote = `${STICK[action]} already does ${actionLabel(action)}.`;
+  } else if (inp.kind === 'key' && RESERVED_KEYS.has(inp.code)) {
     keysNote = '';
   } else {
     const moved = input.bind(keysPlayer, action, inp);
